@@ -94,6 +94,78 @@ class Job_Killer_Cron {
         if (!empty($settings['daily_reports']) && !wp_next_scheduled('job_killer_send_daily_report')) {
             wp_schedule_event(strtotime('tomorrow 8:00 AM'), 'daily', 'job_killer_send_daily_report');
         }
+        
+        // Schedule individual auto feeds
+        $this->schedule_auto_feeds();
+    }
+    
+    /**
+     * Schedule individual auto feeds
+     */
+    private function schedule_auto_feeds() {
+        $auto_feeds = get_option('job_killer_auto_feeds', array());
+        
+        foreach ($auto_feeds as $feed_id => $feed_config) {
+            if (empty($feed_config['active'])) {
+                continue;
+            }
+            
+            $hook_name = 'job_killer_import_auto_feed_' . $feed_id;
+            
+            // Clear existing schedule
+            wp_clear_scheduled_hook($hook_name);
+            
+            // Schedule new cron
+            $interval = $feed_config['cron_interval'] ?? 'twicedaily';
+            wp_schedule_event(time(), $interval, $hook_name, array($feed_id));
+            
+            // Add action for this specific feed
+            add_action($hook_name, array($this, 'run_single_auto_feed_import'));
+        }
+    }
+    
+    /**
+     * Run import for a single auto feed
+     */
+    public function run_single_auto_feed_import($feed_id) {
+        $auto_feeds = get_option('job_killer_auto_feeds', array());
+        
+        if (!isset($auto_feeds[$feed_id]) || empty($auto_feeds[$feed_id]['active'])) {
+            return;
+        }
+        
+        $feed_config = $auto_feeds[$feed_id];
+        
+        $this->helper->log('info', 'cron', 
+            sprintf('Starting auto feed import: %s', $feed_config['name']),
+            array('feed_id' => $feed_id)
+        );
+        
+        try {
+            if (class_exists('Job_Killer_Providers_Manager')) {
+                $providers_manager = new Job_Killer_Providers_Manager();
+                $provider = $providers_manager->get_provider($feed_config['provider_id']);
+                
+                if ($provider) {
+                    $imported = $provider->import_jobs($feed_config);
+                    
+                    // Update last import time
+                    $auto_feeds[$feed_id]['last_import'] = current_time('mysql');
+                    update_option('job_killer_auto_feeds', $auto_feeds);
+                    
+                    $this->helper->log('success', 'cron', 
+                        sprintf('Auto feed "%s" imported %d jobs', $feed_config['name'], $imported),
+                        array('feed_id' => $feed_id, 'imported' => $imported)
+                    );
+                }
+            }
+            
+        } catch (Exception $e) {
+            $this->helper->log('error', 'cron', 
+                sprintf('Auto feed "%s" import failed: %s', $feed_config['name'], $e->getMessage()),
+                array('feed_id' => $feed_id, 'error' => $e->getMessage())
+            );
+        }
     }
     
     /**

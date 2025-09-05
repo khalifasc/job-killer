@@ -141,12 +141,16 @@ class Job_Killer_Providers_Manager {
             wp_send_json_error(__('Invalid provider', 'job-killer'));
         }
         
+        // Generate unique ID if not provided
+        $feed_id = !empty($feed_data['id']) ? sanitize_key($feed_data['id']) : 'auto_feed_' . uniqid() . '_' . time();
+        
         // Sanitize feed configuration
         $feed_config = array(
-            'id' => sanitize_key($feed_data['id'] ?? uniqid('feed_')),
+            'id' => $feed_id,
             'name' => sanitize_text_field($feed_data['name']),
             'provider_id' => sanitize_text_field($feed_data['provider_id']),
             'active' => !empty($feed_data['active']),
+            'cron_interval' => sanitize_text_field($feed_data['cron_interval'] ?? 'twicedaily'),
             'auth' => $this->sanitize_auth_data($feed_data['auth'] ?? array()),
             'parameters' => $this->sanitize_parameters($feed_data['parameters'] ?? array()),
             'created_at' => current_time('mysql'),

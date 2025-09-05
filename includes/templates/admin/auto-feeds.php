@@ -162,6 +162,23 @@ if (!defined('ABSPATH')) {
                                 <p class="description"><?php _e('Selecione o provedor de vagas', 'job-killer'); ?></p>
                             </td>
                         </tr>
+                        
+                        <tr>
+                            <th scope="row">
+                                <label for="feed-cron-interval"><?php _e('Frequência de Importação', 'job-killer'); ?></label>
+                            </th>
+                            <td>
+                                <select id="feed-cron-interval" name="feed[cron_interval]" class="regular-text">
+                                    <option value="every_30_minutes"><?php _e('A cada 30 minutos', 'job-killer'); ?></option>
+                                    <option value="hourly"><?php _e('A cada hora', 'job-killer'); ?></option>
+                                    <option value="every_2_hours"><?php _e('A cada 2 horas', 'job-killer'); ?></option>
+                                    <option value="every_6_hours"><?php _e('A cada 6 horas', 'job-killer'); ?></option>
+                                    <option value="twicedaily" selected><?php _e('Duas vezes por dia', 'job-killer'); ?></option>
+                                    <option value="daily"><?php _e('Diariamente', 'job-killer'); ?></option>
+                                </select>
+                                <p class="description"><?php _e('Com que frequência este feed deve ser importado automaticamente', 'job-killer'); ?></p>
+                            </td>
+                        </tr>
                     </tbody>
                 </table>
                 
@@ -372,6 +389,7 @@ jQuery(document).ready(function($) {
         $('#feed-name').val(feed.name);
         $('#feed-provider').val(feed.provider_id);
         $('#feed-active').prop('checked', feed.active);
+        $('#feed-cron-interval').val(feed.cron_interval || 'twicedaily');
         $('.save-auto-feed-btn').text('<?php _e('Atualizar Feed', 'job-killer'); ?>');
         
         // Load provider fields

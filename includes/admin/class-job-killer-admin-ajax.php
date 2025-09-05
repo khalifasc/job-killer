@@ -53,6 +53,11 @@ class Job_Killer_Admin_Ajax {
         add_action('wp_ajax_job_killer_test_provider', array($this, 'test_provider'));
         add_action('wp_ajax_job_killer_save_auto_feed', array($this, 'save_auto_feed'));
         add_action('wp_ajax_job_killer_get_provider_params', array($this, 'get_provider_params'));
+        
+        // Debug actions
+        add_action('wp_ajax_job_killer_debug_action', array($this, 'debug_action'));
+        add_action('wp_ajax_job_killer_test_connection', array($this, 'test_connection'));
+        add_action('wp_ajax_job_killer_get_live_logs', array($this, 'get_live_logs'));
     }
     
     /**
@@ -658,6 +663,254 @@ class Job_Killer_Admin_Ajax {
         }
         
         wp_send_json_success($provider_info);
+    }
+    
+    /**
+     * Handle debug actions
+     */
+    public function debug_action() {
+        check_ajax_referer('job_killer_admin_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('Insufficient permissions', 'job-killer'));
+        }
+        
+        $action = sanitize_text_field($_POST['debug_action'] ?? '');
+        
+        switch ($action) {
+            case 'clear_cache':
+                if (class_exists('Job_Killer_Cache')) {
+                    Job_Killer_Cache::clear_all();
+                    wp_send_json_success(__('Cache cleared successfully', 'job-killer'));
+                } else {
+                    wp_send_json_error(__('Cache class not available', 'job-killer'));
+                }
+                break;
+                
+            case 'reset_cron':
+                if (class_exists('Job_Killer_Cron')) {
+                    $cron = new Job_Killer_Cron();
+                    $cron->reschedule_all();
+                    wp_send_json_success(__('Cron jobs reset successfully', 'job-killer'));
+                } else {
+                    wp_send_json_error(__('Cron class not available', 'job-killer'));
+                }
+                break;
+                
+            case 'test_import':
+                if (class_exists('Job_Killer_Importer')) {
+                    $importer = new Job_Killer_Importer();
+                    $importer->run_scheduled_import();
+                    wp_send_json_success(__('Test import completed', 'job-killer'));
+                } else {
+                    wp_send_json_error(__('Importer class not available', 'job-killer'));
+                }
+                break;
+                
+            case 'export_debug':
+                $debug_info = $this->get_debug_info();
+                wp_send_json_success($debug_info);
+                break;
+                
+            default:
+                wp_send_json_error(__('Unknown debug action', 'job-killer'));
+        }
+    }
+    
+    /**
+     * Test connection
+     */
+    public function test_connection() {
+        check_ajax_referer('job_killer_admin_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('Insufficient permissions', 'job-killer'));
+        }
+        
+        $test_type = sanitize_text_field($_POST['test_type'] ?? '');
+        
+        switch ($test_type) {
+            case 'curl':
+                $result = $this->test_curl();
+                break;
+            case 'xml':
+                $result = $this->test_xml_parsing();
+                break;
+            case 'database':
+                $result = $this->test_database();
+                break;
+            case 'cron':
+                $result = $this->test_cron();
+                break;
+            default:
+                wp_send_json_error(__('Unknown test type', 'job-killer'));
+        }
+        
+        if ($result['success']) {
+            wp_send_json_success($result['data']);
+        } else {
+            wp_send_json_error($result['message']);
+        }
+    }
+    
+    /**
+     * Get live logs
+     */
+    public function get_live_logs() {
+        check_ajax_referer('job_killer_admin_nonce', 'nonce');
+        
+        $last_id = intval($_POST['last_id'] ?? 0);
+        
+        $helper = new Job_Killer_Helper();
+        $logs = $helper->get_logs(array(
+            'limit' => 50,
+            'order' => 'ASC'
+        ));
+        
+        // Filter logs newer than last_id
+        $new_logs = array_filter($logs, function($log) use ($last_id) {
+            return $log->id > $last_id;
+        });
+        
+        wp_send_json_success(array(
+            'logs' => array_values($new_logs)
+        ));
+    }
+    
+    /**
+     * Test cURL functionality
+     */
+    private function test_curl() {
+        if (!function_exists('curl_version')) {
+            return array(
+                'success' => false,
+                'message' => __('cURL is not available', 'job-killer')
+            );
+        }
+        
+        $curl_info = curl_version();
+        
+        return array(
+            'success' => true,
+            'data' => array(
+                'version' => $curl_info['version'],
+                'ssl_version' => $curl_info['ssl_version'],
+                'protocols' => $curl_info['protocols']
+            )
+        );
+    }
+    
+    /**
+     * Test XML parsing
+     */
+    private function test_xml_parsing() {
+        if (!extension_loaded('libxml') || !extension_loaded('simplexml')) {
+            return array(
+                'success' => false,
+                'message' => __('XML extensions not available', 'job-killer')
+            );
+        }
+        
+        $test_xml = '<?xml version="1.0"?><test><item>Test</item></test>';
+        $xml = simplexml_load_string($test_xml);
+        
+        if ($xml === false) {
+            return array(
+                'success' => false,
+                'message' => __('XML parsing failed', 'job-killer')
+            );
+        }
+        
+        return array(
+            'success' => true,
+            'data' => array(
+                'libxml_version' => LIBXML_DOTTED_VERSION,
+                'test_result' => 'XML parsing successful'
+            )
+        );
+    }
+    
+    /**
+     * Test database connection
+     */
+    private function test_database() {
+        global $wpdb;
+        
+        $result = $wpdb->get_var("SELECT 1");
+        
+        if ($result !== '1') {
+            return array(
+                'success' => false,
+                'message' => __('Database connection failed', 'job-killer')
+            );
+        }
+        
+        return array(
+            'success' => true,
+            'data' => array(
+                'mysql_version' => $wpdb->db_version(),
+                'charset' => $wpdb->charset,
+                'collate' => $wpdb->collate
+            )
+        );
+    }
+    
+    /**
+     * Test cron functionality
+     */
+    private function test_cron() {
+        $cron_disabled = defined('DISABLE_WP_CRON') && DISABLE_WP_CRON;
+        $next_import = wp_next_scheduled('job_killer_import_jobs');
+        
+        return array(
+            'success' => true,
+            'data' => array(
+                'wp_cron_disabled' => $cron_disabled,
+                'next_import' => $next_import ? date('Y-m-d H:i:s', $next_import) : 'Not scheduled',
+                'current_time' => current_time('mysql')
+            )
+        );
+    }
+    
+    /**
+     * Get debug information
+     */
+    private function get_debug_info() {
+        $helper = new Job_Killer_Helper();
+        $system_info = $helper->get_system_info();
+        
+        $debug_info = array(
+            'system' => $system_info,
+            'settings' => get_option('job_killer_settings', array()),
+            'feeds_count' => count(get_option('job_killer_feeds', array())),
+            'auto_feeds_count' => count(get_option('job_killer_auto_feeds', array())),
+            'scheduled_events' => $this->get_scheduled_events()
+        );
+        
+        return $debug_info;
+    }
+    
+    /**
+     * Get scheduled events
+     */
+    private function get_scheduled_events() {
+        $cron_events = _get_cron_array();
+        $job_killer_events = array();
+        
+        foreach ($cron_events as $timestamp => $events) {
+            foreach ($events as $hook => $event_data) {
+                if (strpos($hook, 'job_killer_') === 0) {
+                    $job_killer_events[] = array(
+                        'hook' => $hook,
+                        'timestamp' => $timestamp,
+                        'next_run' => date('Y-m-d H:i:s', $timestamp),
+                        'args' => $event_data
+                    );
+                }
+            }
+        }
+        
+        return $job_killer_events;
     }
     
     /**
